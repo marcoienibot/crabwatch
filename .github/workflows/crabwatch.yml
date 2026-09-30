@@ -72,3 +72,29 @@ jobs:
           # Don't fail on repositories without GitHub Actions workflows.
           fail-on-no-inputs: false
           persona: pedantic
+
+  companion-a:
+    name: Companion job A
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post companion summary
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ### Companion job A
+
+          This job runs alongside Crabwatch to test multiple job summaries in one workflow run.
+          EOF
+
+  companion-b:
+    name: Companion job B
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post companion summary
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ### Companion job B
+
+          This job runs alongside Crabwatch to test multiple job summaries in one workflow run.
+          EOF
