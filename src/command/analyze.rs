@@ -43,59 +43,62 @@ fn is_redacted(repo: &github::OrgRepo, redact_private: bool) -> bool {
     redact_private && repo.is_private
 }
 
-/// Replaces the names of the redacted repositories in the list of an error
-/// with their count.
-fn redacted_repos_line(count: usize) -> Option<String> {
+/// Lists the repositories of an error, one per line and sorted by name. The
+/// redacted repositories are only counted.
+fn repo_list<'a>(
+    lines: impl IntoIterator<Item = (&'a github::OrgRepo, String)>,
+    redact_private: bool,
+) -> String {
+    let (redacted, mut listed): (Vec<_>, Vec<_>) = lines
+        .into_iter()
+        .partition(|(repo, _)| is_redacted(repo, redact_private));
+    listed.sort_by(|(left, _), (right, _)| left.name.cmp(&right.name));
+
+    let count = redacted.len();
     let noun = if count == 1 {
         "repository"
     } else {
         "repositories"
     };
-    (count > 0).then(|| format!("  {count} private {noun}"))
+    listed
+        .into_iter()
+        .map(|(_, line)| line)
+        .chain((count > 0).then(|| format!("  {count} private {noun}")))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
-fn incomplete_org_scan_error(
+/// Lists both the repositories that failed and the ones with findings, so
+/// that a failed repository doesn't hide the findings of the others.
+fn org_scan_error(
     org: &str,
     total_repos: usize,
     failures: &[(github::OrgRepo, String)],
+    repos_with_findings: &[github::OrgRepo],
     redact_private: bool,
-) -> String {
-    let (redacted, listed): (Vec<_>, Vec<_>) = failures
-        .iter()
-        .partition(|(repo, _)| is_redacted(repo, redact_private));
-    let details = listed
-        .into_iter()
-        .map(|(repo, error)| format!("  {org}/{}: {error}", repo.name))
-        .chain(redacted_repos_line(redacted.len()))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    format!(
-        "organization scan for {org} incomplete: {} of {total_repos} repositories failed:\n{details}",
-        failures.len()
-    )
-}
-
-fn org_findings_error(
-    org: &str,
-    total_repos: usize,
-    repos: &[github::OrgRepo],
-    redact_private: bool,
-) -> String {
-    let (redacted, listed): (Vec<_>, Vec<_>) = repos
-        .iter()
-        .partition(|repo| is_redacted(repo, redact_private));
-    let details = listed
-        .into_iter()
-        .map(|repo| format!("  {org}/{}", repo.name))
-        .chain(redacted_repos_line(redacted.len()))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    format!(
-        "zizmor reported findings in {} of {total_repos} repositories of {org}:\n{details}",
-        repos.len()
-    )
+) -> Option<String> {
+    let mut sections = Vec::new();
+    if !failures.is_empty() {
+        let lines = failures
+            .iter()
+            .map(|(repo, error)| (repo, format!("  {org}/{}: {error}", repo.name)));
+        sections.push(format!(
+            "organization scan for {org} incomplete: {} of {total_repos} repositories failed:\n{}",
+            failures.len(),
+            repo_list(lines, redact_private)
+        ));
+    }
+    if !repos_with_findings.is_empty() {
+        let lines = repos_with_findings
+            .iter()
+            .map(|repo| (repo, format!("  {org}/{}", repo.name)));
+        sections.push(format!(
+            "zizmor reported findings in {} of {total_repos} repositories of {org}:\n{}",
+            repos_with_findings.len(),
+            repo_list(lines, redact_private)
+        ));
+    }
+    (!sections.is_empty()).then(|| sections.join("\n"))
 }
 
 pub fn cache_path(repo: &ParsedRepo, crabwatch_dir: &Path, sha: &str) -> PathBuf {
@@ -250,29 +253,14 @@ pub async fn run(
             }
         }
 
-        // Report both lists, so that a failed repository doesn't hide the
-        // findings of the others.
-        let mut errors = Vec::new();
-        if !failures.is_empty() {
-            failures.sort_by(|(left, _), (right, _)| left.name.cmp(&right.name));
-            errors.push(incomplete_org_scan_error(
-                org,
-                total_repos,
-                &failures,
-                redact_private,
-            ));
-        }
-        if !repos_with_findings.is_empty() {
-            repos_with_findings.sort_by(|left, right| left.name.cmp(&right.name));
-            errors.push(org_findings_error(
-                org,
-                total_repos,
-                &repos_with_findings,
-                redact_private,
-            ));
-        }
-        if !errors.is_empty() {
-            bail!("{}", errors.join("\n"));
+        if let Some(error) = org_scan_error(
+            org,
+            total_repos,
+            &failures,
+            &repos_with_findings,
+            redact_private,
+        ) {
+            bail!("{error}");
         }
         log::info!("Scanned {total_repos} repositories, no findings to report.");
     }
@@ -323,11 +311,7 @@ mod tests {
             org_repo("secret-findings-2", true),
         ];
 
-        let error = [
-            incomplete_org_scan_error("rust-lang", 10, &failures, true),
-            org_findings_error("rust-lang", 10, &findings, true),
-        ]
-        .join("\n");
+        let error = org_scan_error("rust-lang", 10, &failures, &findings, true).unwrap();
 
         // The error ends up in public CI logs, so neither the names nor the
         // errors of private repositories may appear in it.
@@ -344,7 +328,7 @@ mod tests {
         ");
 
         // Without the flag, maintainers see every repository.
-        let error = org_findings_error("rust-lang", 10, &findings, false);
+        let error = org_scan_error("rust-lang", 10, &failures, &findings, false).unwrap();
         assert!(error.contains("rust-lang/secret-findings-1"));
     }
 
