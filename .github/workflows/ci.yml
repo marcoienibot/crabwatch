@@ -75,20 +75,29 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+    outputs:
+      zizmor-version: ${{ steps.zizmor-version.outputs.version }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+
+      # crabwatch.yml is the only file that sets the zizmor version.
+      - name: Read zizmor version
+        id: zizmor-version
+        run: |
+          version=$(yq --exit-status '.jobs.zizmor.steps[] | select(.uses == "zizmorcore/zizmor-action@*") | .with.version' .github/workflows/crabwatch.yml)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Run zizmor
         uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
         with:
           persona: pedantic
           advanced-security: false
-          # The zizmor-action release above and this version must match
-          # crabwatch.yml (checked by a test), so that pull requests fail if
-          # the release doesn't support the version.
-          version: 1.31.1
+          # The zizmor-action release above must match crabwatch.yml (checked
+          # by a test), so that pull requests fail if the release doesn't
+          # support the version.
+          version: ${{ steps.zizmor-version.outputs.version }}
 
   # Fail if zizmor reports findings in any rust-lang repository that the CLI
   # analyzes, so that the changes don't introduce findings.
@@ -96,6 +105,8 @@ jobs:
     name: Analyze rust-lang
     # The GitHub App secrets are only available in the merge queue.
     if: ${{ github.event_name == 'merge_group' }}
+    # Install the zizmor version that the zizmor job ran.
+    needs: zizmor
     runs-on: ubuntu-24.04
     environment: merge-queue
     permissions:
@@ -111,8 +122,7 @@ jobs:
       - name: Install zizmor
         uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
         with:
-          # Must match the zizmor version in crabwatch.yml (checked by a test).
-          tool: zizmor@1.31.1
+          tool: zizmor@${{ needs.zizmor.outputs.zizmor-version }}
 
       - name: Generate GitHub App token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
