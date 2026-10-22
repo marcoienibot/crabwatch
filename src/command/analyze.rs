@@ -59,6 +59,27 @@ fn incomplete_org_scan_error(
     )
 }
 
+fn org_findings_error(
+    org: &str,
+    total_repos: usize,
+    repos: &[String],
+    private_repos: usize,
+) -> anyhow::Error {
+    let mut details = repos
+        .iter()
+        .map(|repo| format!("  {org}/{repo}"))
+        .collect::<Vec<_>>();
+    if private_repos > 0 {
+        details.push(format!("  private repositories: {private_repos}"));
+    }
+
+    anyhow!(
+        "zizmor reported findings in {} of {total_repos} repositories of {org}:\n{}",
+        repos.len() + private_repos,
+        details.join("\n")
+    )
+}
+
 pub fn cache_path(repo: &ParsedRepo, crabwatch_dir: &Path, sha: &str) -> PathBuf {
     crabwatch_dir
         .join("repos")
@@ -234,20 +255,14 @@ pub async fn run(
                 private_failures,
             ));
         }
-        let findings = repos_with_findings.len() + private_with_findings;
-        if findings > 0 {
+        if !repos_with_findings.is_empty() || private_with_findings > 0 {
             repos_with_findings.sort();
-            let mut details = repos_with_findings
-                .iter()
-                .map(|repo| format!("  {org}/{repo}"))
-                .collect::<Vec<_>>();
-            if private_with_findings > 0 {
-                details.push(format!("  private repositories: {private_with_findings}"));
-            }
-            bail!(
-                "zizmor reported findings in {findings} of {total_repos} repositories of {org}:\n{}",
-                details.join("\n")
-            );
+            return Err(org_findings_error(
+                org,
+                total_repos,
+                &repos_with_findings,
+                private_with_findings,
+            ));
         }
         log::info!("Scanned {total_repos} repositories, no findings to report.");
     }
