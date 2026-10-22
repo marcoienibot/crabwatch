@@ -23,6 +23,8 @@ pub async fn clone_repo(
     let output = Command::new("git")
         // Fail instead of waiting for credentials if the clone isn't authorized.
         .env("GIT_TERMINAL_PROMPT", "0")
+        // Crabwatch doesn't need Git LFS files, so don't download them.
+        .env("GIT_LFS_SKIP_SMUDGE", "1")
         // Read by the credential helper below. Git rejects URLs with a password
         // if `transfer.credentialsInUrl` is `die`, so the token can't be in the
         // URL.
@@ -31,9 +33,11 @@ pub async fn clone_repo(
         // helpers to get credentials or to save the token.
         .arg("-c")
         .arg("credential.helper=")
-        // GitHub reads the token from the password.
+        // GitHub reads the token from the password. Only give it to GitHub: the
+        // programs that git runs, like the Git LFS filter, also use this helper
+        // for hosts that the cloned repository can choose.
         .arg("-c")
-        .arg(r#"credential.helper=!f() { test "$1" = get && echo username=x-access-token && echo "password=$CRABWATCH_GITHUB_TOKEN"; }; f"#)
+        .arg(r#"credential.https://github.com.helper=!f() { test "$1" = get && echo username=x-access-token && echo "password=$CRABWATCH_GITHUB_TOKEN"; }; f"#)
         .arg("clone")
         .arg("--depth")
         .arg("1")
