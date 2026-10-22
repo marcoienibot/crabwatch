@@ -38,14 +38,35 @@ fn crabwatch_dir(cache_dir_override: Option<&Path>) -> anyhow::Result<PathBuf> {
     }
 }
 
+/// Whether to hide the name, zizmor output and errors of the repository.
+fn is_redacted(repo: &github::OrgRepo, redact_private: bool) -> bool {
+    redact_private && repo.is_private
+}
+
+/// Replaces the names of the redacted repositories in the list of an error
+/// with their count.
+fn redacted_repos_line(count: usize) -> Option<String> {
+    let noun = if count == 1 {
+        "repository"
+    } else {
+        "repositories"
+    };
+    (count > 0).then(|| format!("  {count} private {noun}"))
+}
+
 fn incomplete_org_scan_error(
     org: &str,
     total_repos: usize,
-    failures: &[(ParsedRepo, String)],
+    failures: &[(github::OrgRepo, String)],
+    redact_private: bool,
 ) -> String {
-    let details = failures
+    let (redacted, listed): (Vec<_>, Vec<_>) = failures
         .iter()
-        .map(|(repo, error)| format!("  {}/{}: {error}", repo.org, repo.repo))
+        .partition(|(repo, _)| is_redacted(repo, redact_private));
+    let details = listed
+        .into_iter()
+        .map(|(repo, error)| format!("  {org}/{}: {error}", repo.name))
+        .chain(redacted_repos_line(redacted.len()))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -55,10 +76,19 @@ fn incomplete_org_scan_error(
     )
 }
 
-fn org_findings_error(org: &str, total_repos: usize, repos: &[String]) -> String {
-    let details = repos
+fn org_findings_error(
+    org: &str,
+    total_repos: usize,
+    repos: &[github::OrgRepo],
+    redact_private: bool,
+) -> String {
+    let (redacted, listed): (Vec<_>, Vec<_>) = repos
         .iter()
-        .map(|repo| format!("  {org}/{repo}"))
+        .partition(|repo| is_redacted(repo, redact_private));
+    let details = listed
+        .into_iter()
+        .map(|repo| format!("  {org}/{}", repo.name))
+        .chain(redacted_repos_line(redacted.len()))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -153,6 +183,7 @@ pub async fn run(
     github_token: &str,
     repo_arg: Option<String>,
     org_arg: Option<String>,
+    redact_private: bool,
     cache_dir_override: Option<&Path>,
 ) -> anyhow::Result<()> {
     let client = reqwest::Client::new();
@@ -187,34 +218,34 @@ pub async fn run(
             .map(|repo| {
                 let parsed = ParsedRepo {
                     org: org.clone(),
-                    repo,
+                    repo: repo.name.clone(),
                 };
                 async move {
                     let result =
                         analyze_repo(client, &parsed, crabwatch_dir, policy, github_token).await;
-                    (parsed, result)
+                    (repo, result)
                 }
             })
             .buffer_unordered(MAX_CONCURRENT_REPOS);
 
-        while let Some((parsed, result)) = stream.next().await {
+        while let Some((repo, result)) = stream.next().await {
+            let redacted = is_redacted(&repo, redact_private);
             match result {
                 Ok((output, outcome)) => {
-                    log::log!(
-                        level_for(&outcome),
-                        "=== {}/{} ===\n{output}",
-                        parsed.org,
-                        parsed.repo
-                    );
+                    if !redacted {
+                        log::log!(level_for(&outcome), "=== {org}/{} ===\n{output}", repo.name);
+                    }
                     if matches!(outcome, scan::ScanOutcome::Findings) {
-                        repos_with_findings.push(parsed.repo);
+                        repos_with_findings.push(repo);
                     }
                 }
 
                 Err(err) => {
                     let error = format!("{err:#}");
-                    log::error!("failed to scan {}/{}: {error}", parsed.org, parsed.repo);
-                    failures.push((parsed, error));
+                    if !redacted {
+                        log::error!("failed to scan {org}/{}: {error}", repo.name);
+                    }
+                    failures.push((repo, error));
                 }
             }
         }
@@ -223,12 +254,22 @@ pub async fn run(
         // findings of the others.
         let mut errors = Vec::new();
         if !failures.is_empty() {
-            failures.sort_by(|(left, _), (right, _)| left.repo.cmp(&right.repo));
-            errors.push(incomplete_org_scan_error(org, total_repos, &failures));
+            failures.sort_by(|(left, _), (right, _)| left.name.cmp(&right.name));
+            errors.push(incomplete_org_scan_error(
+                org,
+                total_repos,
+                &failures,
+                redact_private,
+            ));
         }
         if !repos_with_findings.is_empty() {
-            repos_with_findings.sort();
-            errors.push(org_findings_error(org, total_repos, &repos_with_findings));
+            repos_with_findings.sort_by(|left, right| left.name.cmp(&right.name));
+            errors.push(org_findings_error(
+                org,
+                total_repos,
+                &repos_with_findings,
+                redact_private,
+            ));
         }
         if !errors.is_empty() {
             bail!("{}", errors.join("\n"));
@@ -261,6 +302,50 @@ mod tests {
             level_for(&scan::ScanOutcome::NoWorkflows),
             log::Level::Debug
         );
+    }
+
+    fn org_repo(name: &str, is_private: bool) -> github::OrgRepo {
+        github::OrgRepo {
+            name: name.to_string(),
+            is_private,
+        }
+    }
+
+    #[test]
+    fn redacted_errors_only_count_private_repositories() {
+        let failures = [
+            (org_repo("public-fail", false), "clone failed".to_string()),
+            (org_repo("secret-fail", true), "secret stderr".to_string()),
+        ];
+        let findings = [
+            org_repo("public-findings", false),
+            org_repo("secret-findings-1", true),
+            org_repo("secret-findings-2", true),
+        ];
+
+        let error = [
+            incomplete_org_scan_error("rust-lang", 10, &failures, true),
+            org_findings_error("rust-lang", 10, &findings, true),
+        ]
+        .join("\n");
+
+        // The error ends up in public CI logs, so neither the names nor the
+        // errors of private repositories may appear in it.
+        assert!(!error.contains("secret"));
+        // Public repositories are still listed, and the totals still count
+        // the private ones.
+        insta::assert_snapshot!(error, @r"
+        organization scan for rust-lang incomplete: 2 of 10 repositories failed:
+          rust-lang/public-fail: clone failed
+          1 private repository
+        zizmor reported findings in 3 of 10 repositories of rust-lang:
+          rust-lang/public-findings
+          2 private repositories
+        ");
+
+        // Without the flag, maintainers see every repository.
+        let error = org_findings_error("rust-lang", 10, &findings, false);
+        assert!(error.contains("rust-lang/secret-findings-1"));
     }
 
     #[test]
