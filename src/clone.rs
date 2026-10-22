@@ -18,16 +18,22 @@ pub async fn clone_repo(
             .context("failed to remove leftover temp clone directory")?;
     }
 
-    // GitHub reads the token from the password. If the URL only contains a
-    // username, git asks for the password.
-    let url = format!("https://x-access-token:{github_token}@github.com/{org}/{repo}.git");
+    let url = format!("https://github.com/{org}/{repo}.git");
 
     let output = Command::new("git")
         // Fail instead of waiting for credentials if the clone isn't authorized.
         .env("GIT_TERMINAL_PROMPT", "0")
-        // Don't save the token in the user's credential helpers.
+        // Read by the credential helper below. Git rejects URLs with a password
+        // if `transfer.credentialsInUrl` is `die`, so the token can't be in the
+        // URL.
+        .env("CRABWATCH_GITHUB_TOKEN", github_token)
+        // Reset the credential helpers, so that git doesn't use the user's
+        // helpers to get credentials or to save the token.
         .arg("-c")
         .arg("credential.helper=")
+        // GitHub reads the token from the password.
+        .arg("-c")
+        .arg(r#"credential.helper=!f() { test "$1" = get && echo username=x-access-token && echo "password=$CRABWATCH_GITHUB_TOKEN"; }; f"#)
         .arg("clone")
         .arg("--depth")
         .arg("1")
