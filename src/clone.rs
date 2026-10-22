@@ -18,9 +18,13 @@ pub async fn clone_repo(
             .context("failed to remove leftover temp clone directory")?;
     }
 
-    let url = format!("https://{github_token}@github.com/{org}/{repo}.git");
+    // GitHub reads the token from the password. If the URL only contains a
+    // username, git asks for the password.
+    let url = format!("https://x-access-token:{github_token}@github.com/{org}/{repo}.git");
 
     let output = Command::new("git")
+        // Fail instead of waiting for credentials if the clone isn't authorized.
+        .env("GIT_TERMINAL_PROMPT", "0")
         .arg("clone")
         .arg("--depth")
         .arg("1")
