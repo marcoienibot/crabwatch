@@ -18,7 +18,9 @@ pub async fn clone_repo(
             .context("failed to remove leftover temp clone directory")?;
     }
 
-    let url = format!("https://github.com/{org}/{repo}.git");
+    // The username keeps `insteadOf` rules for `https://github.com/` from
+    // rewriting the URL, e.g. to clone with the user's SSH key.
+    let url = format!("https://x-access-token@github.com/{org}/{repo}.git");
 
     let output = Command::new("git")
         // Fail instead of waiting for credentials if the clone isn't authorized.
@@ -37,7 +39,7 @@ pub async fn clone_repo(
         // programs that git runs, like the Git LFS filter, also use this helper
         // for hosts that the cloned repository can choose.
         .arg("-c")
-        .arg(r#"credential.https://github.com.helper=!f() { test "$1" = get && echo username=x-access-token && echo "password=$CRABWATCH_GITHUB_TOKEN"; }; f"#)
+        .arg(r#"credential.https://github.com.helper=!f() { test "$1" = get && echo "password=$CRABWATCH_GITHUB_TOKEN"; }; f"#)
         .arg("clone")
         .arg("--depth")
         .arg("1")
