@@ -237,12 +237,16 @@ pub async fn run(
         let findings = repos_with_findings.len() + private_with_findings;
         if findings > 0 {
             repos_with_findings.sort();
+            let mut details = repos_with_findings
+                .iter()
+                .map(|repo| format!("  {org}/{repo}"))
+                .collect::<Vec<_>>();
             if private_with_findings > 0 {
-                repos_with_findings.push(format!("private repositories: {private_with_findings}"));
+                details.push(format!("  private repositories: {private_with_findings}"));
             }
             bail!(
-                "zizmor reported findings in {findings} of {total_repos} repositories of {org}: {}",
-                repos_with_findings.join(", ")
+                "zizmor reported findings in {findings} of {total_repos} repositories of {org}:\n{}",
+                details.join("\n")
             );
         }
         log::info!("Scanned {total_repos} repositories, no findings to report.");
