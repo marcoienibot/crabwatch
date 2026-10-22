@@ -1,5 +1,5 @@
 use crate::{clone, config, github, scan};
-use anyhow::{Context as _, anyhow, bail};
+use anyhow::{Context as _, bail};
 use futures::stream::StreamExt;
 use std::path::{Path, PathBuf};
 
@@ -43,7 +43,7 @@ fn incomplete_org_scan_error(
     total_repos: usize,
     failures: &[(ParsedRepo, String)],
     private_failures: usize,
-) -> anyhow::Error {
+) -> String {
     let mut details = failures
         .iter()
         .map(|(repo, error)| format!("  {}/{}: {error}", repo.org, repo.repo))
@@ -52,7 +52,7 @@ fn incomplete_org_scan_error(
         details.push(format!("  private repositories: {private_failures}"));
     }
 
-    anyhow!(
+    format!(
         "organization scan for {org} incomplete: {} of {total_repos} repositories failed:\n{}",
         failures.len() + private_failures,
         details.join("\n")
@@ -64,7 +64,7 @@ fn org_findings_error(
     total_repos: usize,
     repos: &[String],
     private_repos: usize,
-) -> anyhow::Error {
+) -> String {
     let mut details = repos
         .iter()
         .map(|repo| format!("  {org}/{repo}"))
@@ -73,7 +73,7 @@ fn org_findings_error(
         details.push(format!("  private repositories: {private_repos}"));
     }
 
-    anyhow!(
+    format!(
         "zizmor reported findings in {} of {total_repos} repositories of {org}:\n{}",
         repos.len() + private_repos,
         details.join("\n")
@@ -246,9 +246,12 @@ pub async fn run(
             }
         }
 
+        // Report both lists, so that a failed repository doesn't hide the
+        // findings of the others.
+        let mut errors = Vec::new();
         if !failures.is_empty() || private_failures > 0 {
             failures.sort_by(|(left, _), (right, _)| left.repo.cmp(&right.repo));
-            return Err(incomplete_org_scan_error(
+            errors.push(incomplete_org_scan_error(
                 org,
                 total_repos,
                 &failures,
@@ -257,12 +260,15 @@ pub async fn run(
         }
         if !repos_with_findings.is_empty() || private_with_findings > 0 {
             repos_with_findings.sort();
-            return Err(org_findings_error(
+            errors.push(org_findings_error(
                 org,
                 total_repos,
                 &repos_with_findings,
                 private_with_findings,
             ));
+        }
+        if !errors.is_empty() {
+            bail!("{}", errors.join("\n"));
         }
         log::info!("Scanned {total_repos} repositories, no findings to report.");
     }
@@ -298,7 +304,7 @@ mod tests {
     fn error_lists_public_failures_and_counts_private_ones() {
         let failures = [(test_repo(), "clone failed".to_string())];
 
-        let error = incomplete_org_scan_error("rust-lang", 10, &failures, 2).to_string();
+        let error = incomplete_org_scan_error("rust-lang", 10, &failures, 2);
 
         // Only the public failure is listed, but the total also includes the
         // 2 private failures, so it still matches how many repositories failed.
