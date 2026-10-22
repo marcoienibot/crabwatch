@@ -151,7 +151,10 @@ pub async fn run(
         let (output, outcome) =
             analyze_repo(&client, &parsed, &crabwatch_dir, &policy, github_token).await?;
         match outcome {
-            scan::ScanOutcome::Findings => log::info!("{output}"),
+            scan::ScanOutcome::Findings => {
+                log::info!("{output}");
+                bail!("zizmor reported findings in {repo_arg}");
+            }
             scan::ScanOutcome::Clean => log::info!("No findings to report."),
             scan::ScanOutcome::NoWorkflows => log::info!("No workflows found to scan."),
         }
@@ -165,7 +168,7 @@ pub async fn run(
         let policy = &policy;
         let org = &org;
         let mut failures = Vec::new();
-        let mut any_findings = false;
+        let mut repos_with_findings = Vec::new();
 
         let mut stream = futures::stream::iter(repos)
             .map(|repo| {
@@ -184,15 +187,15 @@ pub async fn run(
         while let Some((parsed, result)) = stream.next().await {
             match result {
                 Ok((output, outcome)) => {
-                    if matches!(outcome, scan::ScanOutcome::Findings) {
-                        any_findings = true;
-                    }
                     log::log!(
                         level_for(&outcome),
                         "=== {}/{} ===\n{output}",
                         parsed.org,
                         parsed.repo
                     );
+                    if matches!(outcome, scan::ScanOutcome::Findings) {
+                        repos_with_findings.push(parsed.repo);
+                    }
                 }
 
                 Err(err) => {
@@ -207,9 +210,15 @@ pub async fn run(
             failures.sort_by(|(left, _), (right, _)| left.repo.cmp(&right.repo));
             return Err(incomplete_org_scan_error(org, total_repos, &failures));
         }
-        if !any_findings {
-            log::info!("Scanned {total_repos} repositories, no findings to report.");
+        if !repos_with_findings.is_empty() {
+            repos_with_findings.sort();
+            bail!(
+                "zizmor reported findings in {} of {total_repos} repositories of {org}: {}",
+                repos_with_findings.len(),
+                repos_with_findings.join(", ")
+            );
         }
+        log::info!("Scanned {total_repos} repositories, no findings to report.");
     }
 
     Ok(())
