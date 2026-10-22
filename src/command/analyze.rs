@@ -156,7 +156,10 @@ pub async fn run(
         let (output, outcome) =
             analyze_repo(&client, &parsed, &crabwatch_dir, &policy, github_token).await?;
         match outcome {
-            scan::ScanOutcome::Findings => log::info!("{output}"),
+            scan::ScanOutcome::Findings => {
+                log::info!("{output}");
+                bail!("zizmor reported findings in {repo_arg}");
+            }
             scan::ScanOutcome::Clean => log::info!("No findings to report."),
             scan::ScanOutcome::NoWorkflows => log::info!("No workflows found to scan."),
         }
@@ -170,9 +173,9 @@ pub async fn run(
         let policy = &policy;
         let org = &org;
         let mut failures = Vec::new();
-        let mut any_findings = false;
-        let mut private_with_findings = 0;
         let mut private_failures = 0;
+        let mut repos_with_findings = Vec::new();
+        let mut private_with_findings = 0;
 
         let mut stream = futures::stream::iter(repos)
             .map(|repo| {
@@ -194,10 +197,7 @@ pub async fn run(
             // names and weaknesses, so only count them.
             if redacted {
                 match result {
-                    Ok((_, scan::ScanOutcome::Findings)) => {
-                        any_findings = true;
-                        private_with_findings += 1;
-                    }
+                    Ok((_, scan::ScanOutcome::Findings)) => private_with_findings += 1,
                     Ok(_) => {}
                     Err(_) => private_failures += 1,
                 }
@@ -206,15 +206,15 @@ pub async fn run(
 
             match result {
                 Ok((output, outcome)) => {
-                    if matches!(outcome, scan::ScanOutcome::Findings) {
-                        any_findings = true;
-                    }
                     log::log!(
                         level_for(&outcome),
                         "=== {}/{} ===\n{output}",
                         parsed.org,
                         parsed.repo
                     );
+                    if matches!(outcome, scan::ScanOutcome::Findings) {
+                        repos_with_findings.push(parsed.repo);
+                    }
                 }
 
                 Err(err) => {
@@ -225,13 +225,6 @@ pub async fn run(
             }
         }
 
-        // The zizmor output of the redacted repositories isn't printed, so
-        // count them to show that they have findings.
-        if private_with_findings > 0 {
-            log::info!(
-                "zizmor reported findings in private repositories of {org}: {private_with_findings}"
-            );
-        }
         if !failures.is_empty() || private_failures > 0 {
             failures.sort_by(|(left, _), (right, _)| left.repo.cmp(&right.repo));
             return Err(incomplete_org_scan_error(
@@ -241,9 +234,18 @@ pub async fn run(
                 private_failures,
             ));
         }
-        if !any_findings {
-            log::info!("Scanned {total_repos} repositories, no findings to report.");
+        let findings = repos_with_findings.len() + private_with_findings;
+        if findings > 0 {
+            repos_with_findings.sort();
+            if private_with_findings > 0 {
+                repos_with_findings.push(format!("private repositories: {private_with_findings}"));
+            }
+            bail!(
+                "zizmor reported findings in {findings} of {total_repos} repositories of {org}: {}",
+                repos_with_findings.join(", ")
+            );
         }
+        log::info!("Scanned {total_repos} repositories, no findings to report.");
     }
 
     Ok(())
