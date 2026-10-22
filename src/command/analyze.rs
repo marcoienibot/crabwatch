@@ -55,6 +55,19 @@ fn incomplete_org_scan_error(
     )
 }
 
+fn org_findings_error(org: &str, total_repos: usize, repos: &[String]) -> anyhow::Error {
+    let details = repos
+        .iter()
+        .map(|repo| format!("  {org}/{repo}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    anyhow!(
+        "zizmor reported findings in {} of {total_repos} repositories of {org}:\n{details}",
+        repos.len()
+    )
+}
+
 pub fn cache_path(repo: &ParsedRepo, crabwatch_dir: &Path, sha: &str) -> PathBuf {
     crabwatch_dir
         .join("repos")
@@ -212,15 +225,7 @@ pub async fn run(
         }
         if !repos_with_findings.is_empty() {
             repos_with_findings.sort();
-            let details = repos_with_findings
-                .iter()
-                .map(|repo| format!("  {org}/{repo}"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            bail!(
-                "zizmor reported findings in {} of {total_repos} repositories of {org}:\n{details}",
-                repos_with_findings.len()
-            );
+            return Err(org_findings_error(org, total_repos, &repos_with_findings));
         }
         log::info!("Scanned {total_repos} repositories, no findings to report.");
     }
