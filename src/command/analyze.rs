@@ -1,5 +1,5 @@
 use crate::{clone, config, github, scan};
-use anyhow::{Context as _, anyhow, bail};
+use anyhow::{Context as _, bail};
 use futures::stream::StreamExt;
 use std::path::{Path, PathBuf};
 
@@ -42,27 +42,27 @@ fn incomplete_org_scan_error(
     org: &str,
     total_repos: usize,
     failures: &[(ParsedRepo, String)],
-) -> anyhow::Error {
+) -> String {
     let details = failures
         .iter()
         .map(|(repo, error)| format!("  {}/{}: {error}", repo.org, repo.repo))
         .collect::<Vec<_>>()
         .join("\n");
 
-    anyhow!(
+    format!(
         "organization scan for {org} incomplete: {} of {total_repos} repositories failed:\n{details}",
         failures.len()
     )
 }
 
-fn org_findings_error(org: &str, total_repos: usize, repos: &[String]) -> anyhow::Error {
+fn org_findings_error(org: &str, total_repos: usize, repos: &[String]) -> String {
     let details = repos
         .iter()
         .map(|repo| format!("  {org}/{repo}"))
         .collect::<Vec<_>>()
         .join("\n");
 
-    anyhow!(
+    format!(
         "zizmor reported findings in {} of {total_repos} repositories of {org}:\n{details}",
         repos.len()
     )
@@ -219,13 +219,19 @@ pub async fn run(
             }
         }
 
+        // Report both lists, so that a failed repository doesn't hide the
+        // findings of the others.
+        let mut errors = Vec::new();
         if !failures.is_empty() {
             failures.sort_by(|(left, _), (right, _)| left.repo.cmp(&right.repo));
-            return Err(incomplete_org_scan_error(org, total_repos, &failures));
+            errors.push(incomplete_org_scan_error(org, total_repos, &failures));
         }
         if !repos_with_findings.is_empty() {
             repos_with_findings.sort();
-            return Err(org_findings_error(org, total_repos, &repos_with_findings));
+            errors.push(org_findings_error(org, total_repos, &repos_with_findings));
+        }
+        if !errors.is_empty() {
+            bail!("{}", errors.join("\n"));
         }
         log::info!("Scanned {total_repos} repositories, no findings to report.");
     }
