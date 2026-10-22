@@ -25,6 +25,9 @@ pub async fn clone_repo(
     let output = Command::new("git")
         // Fail instead of waiting for credentials if the clone isn't authorized.
         .env("GIT_TERMINAL_PROMPT", "0")
+        // Don't save the token in the user's credential helpers.
+        .arg("-c")
+        .arg("credential.helper=")
         .arg("clone")
         .arg("--depth")
         .arg("1")
