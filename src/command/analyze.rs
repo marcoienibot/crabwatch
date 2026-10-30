@@ -316,6 +316,19 @@ mod tests {
     }
 
     #[test]
+    fn findings_error_lists_public_repositories_and_counts_private_ones() {
+        let repos = ["crabwatch".to_string()];
+
+        let error = org_findings_error("rust-lang", 10, &repos, 2);
+
+        insta::assert_snapshot!(error, @r"
+        zizmor reported findings in 3 of 10 repositories of rust-lang:
+          rust-lang/crabwatch
+          private repositories: 2
+        ");
+    }
+
+    #[test]
     fn parses_valid_input() {
         let parsed = parse_repo("rust-lang/crabwatch").unwrap();
         assert_eq!(parsed, test_repo());
