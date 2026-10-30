@@ -340,6 +340,19 @@ mod tests {
     }
 
     #[test]
+    fn org_scan_fails_on_public_findings_alone() {
+        let repos_with_findings = vec!["crabwatch".to_string()];
+
+        let error =
+            org_scan_result("rust-lang", 10, Vec::new(), 0, repos_with_findings, 0).unwrap_err();
+
+        insta::assert_snapshot!(error, @r"
+        zizmor reported findings in 1 of 10 repositories of rust-lang:
+          rust-lang/crabwatch
+        ");
+    }
+
+    #[test]
     fn org_scan_fails_on_private_findings_alone() {
         let error = org_scan_result("rust-lang", 10, Vec::new(), 0, Vec::new(), 2).unwrap_err();
 
