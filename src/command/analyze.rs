@@ -356,18 +356,19 @@ mod tests {
             repo: "foo".to_string(),
         };
         let failures = vec![(failed_repo, "clone failed".to_string())];
-        let repos_with_findings = vec!["crabwatch".to_string()];
+        let repos_with_findings = vec!["crabwatch".to_string(), "cargo".to_string()];
 
         let error =
-            org_scan_result("rust-lang", 10, failures, 2, repos_with_findings, 2).unwrap_err();
+            org_scan_result("rust-lang", 10, failures, 2, repos_with_findings, 3).unwrap_err();
 
         insta::assert_snapshot!(error, @r"
         organization scan for rust-lang incomplete: 3 of 10 repositories failed:
           rust-lang/foo: clone failed
           private repositories: 2
-        zizmor reported findings in 3 of 10 repositories of rust-lang:
+        zizmor reported findings in 5 of 10 repositories of rust-lang:
+          rust-lang/cargo
           rust-lang/crabwatch
-          private repositories: 2
+          private repositories: 3
         ");
     }
 
