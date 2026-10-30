@@ -80,6 +80,41 @@ fn org_findings_error(
     )
 }
 
+fn org_scan_result(
+    org: &str,
+    total_repos: usize,
+    mut failures: Vec<(ParsedRepo, String)>,
+    private_failures: usize,
+    mut repos_with_findings: Vec<String>,
+    private_with_findings: usize,
+) -> anyhow::Result<()> {
+    // Report both lists, so that a failed repository doesn't hide the
+    // findings of the others.
+    let mut errors = Vec::new();
+    if !failures.is_empty() || private_failures > 0 {
+        failures.sort_by(|(left, _), (right, _)| left.repo.cmp(&right.repo));
+        errors.push(incomplete_org_scan_error(
+            org,
+            total_repos,
+            &failures,
+            private_failures,
+        ));
+    }
+    if !repos_with_findings.is_empty() || private_with_findings > 0 {
+        repos_with_findings.sort();
+        errors.push(org_findings_error(
+            org,
+            total_repos,
+            &repos_with_findings,
+            private_with_findings,
+        ));
+    }
+    if !errors.is_empty() {
+        bail!("{}", errors.join("\n"));
+    }
+    Ok(())
+}
+
 pub fn cache_path(repo: &ParsedRepo, crabwatch_dir: &Path, sha: &str) -> PathBuf {
     crabwatch_dir
         .join("repos")
@@ -246,30 +281,14 @@ pub async fn run(
             }
         }
 
-        // Report both lists, so that a failed repository doesn't hide the
-        // findings of the others.
-        let mut errors = Vec::new();
-        if !failures.is_empty() || private_failures > 0 {
-            failures.sort_by(|(left, _), (right, _)| left.repo.cmp(&right.repo));
-            errors.push(incomplete_org_scan_error(
-                org,
-                total_repos,
-                &failures,
-                private_failures,
-            ));
-        }
-        if !repos_with_findings.is_empty() || private_with_findings > 0 {
-            repos_with_findings.sort();
-            errors.push(org_findings_error(
-                org,
-                total_repos,
-                &repos_with_findings,
-                private_with_findings,
-            ));
-        }
-        if !errors.is_empty() {
-            bail!("{}", errors.join("\n"));
-        }
+        org_scan_result(
+            org,
+            total_repos,
+            failures,
+            private_failures,
+            repos_with_findings,
+            private_with_findings,
+        )?;
         log::info!("Scanned {total_repos} repositories, no findings to report.");
     }
 
@@ -316,12 +335,36 @@ mod tests {
     }
 
     #[test]
-    fn findings_error_lists_public_repositories_and_counts_private_ones() {
-        let repos = ["crabwatch".to_string()];
+    fn org_scan_without_failures_or_findings_succeeds() {
+        assert!(org_scan_result("rust-lang", 10, Vec::new(), 0, Vec::new(), 0).is_ok());
+    }
 
-        let error = org_findings_error("rust-lang", 10, &repos, 2);
+    #[test]
+    fn org_scan_fails_on_private_findings_alone() {
+        let error = org_scan_result("rust-lang", 10, Vec::new(), 0, Vec::new(), 2).unwrap_err();
 
         insta::assert_snapshot!(error, @r"
+        zizmor reported findings in 2 of 10 repositories of rust-lang:
+          private repositories: 2
+        ");
+    }
+
+    #[test]
+    fn org_scan_reports_both_failures_and_findings() {
+        let failed_repo = ParsedRepo {
+            org: "rust-lang".to_string(),
+            repo: "foo".to_string(),
+        };
+        let failures = vec![(failed_repo, "clone failed".to_string())];
+        let repos_with_findings = vec!["crabwatch".to_string()];
+
+        let error =
+            org_scan_result("rust-lang", 10, failures, 2, repos_with_findings, 2).unwrap_err();
+
+        insta::assert_snapshot!(error, @r"
+        organization scan for rust-lang incomplete: 3 of 10 repositories failed:
+          rust-lang/foo: clone failed
+          private repositories: 2
         zizmor reported findings in 3 of 10 repositories of rust-lang:
           rust-lang/crabwatch
           private repositories: 2
