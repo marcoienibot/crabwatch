@@ -22,7 +22,7 @@ base64 = "0.23.1"
 insta = "1.48.0"
 
 [lints.clippy]
-pedantic = { level = "warn" }
+pedantic = { level = "warn", priority = -1 }
 
 # Restriction lints are never enabled as a group, so opt in one by one.
 as_underscore = "warn"
