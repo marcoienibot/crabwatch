@@ -29,7 +29,7 @@ pedantic = { level = "warn", priority = -1 }
 # Pedantic lints that currently fire. Fix the code, then delete these lines.
 unnecessary_debug_formatting = "allow"
 
-# Restriction and nursery lints are never enabled as a group, so opt in one by one.
+# Restriction lints are never enabled as a group, so opt in one by one.
 as_underscore = "warn"
 exit = "warn"
 filetype_is_file = "warn"
@@ -43,9 +43,11 @@ map_with_unused_argument_over_ranges = "warn"
 mem_forget = "warn"
 rc_buffer = "warn"
 rest_pat_in_fully_bound_structs = "warn"
-trait_duplication_in_bounds = "warn"
-type_repetition_in_bounds = "warn"
 unneeded_field_pattern = "warn"
 unseparated_literal_suffix = "warn"
-use_self = "warn"
 verbose_file_reads = "warn"
+
+# Nursery lints are never enabled as a group, so opt in one by one.
+trait_duplication_in_bounds = "warn"
+type_repetition_in_bounds = "warn"
+use_self = "warn"
