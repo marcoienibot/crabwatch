@@ -52,10 +52,17 @@ pub async fn clone_repo(
 }
 
 /// Best-effort removal of a temporary clone directory.
-/// Called on error paths, so a failure here is only logged.
+/// Called on error paths, so a failure here is only logged, at debug level
+/// because the path can contain the name of a private repository.
 fn remove_temp_dir(path: &Path) {
-    if let Err(error) = std::fs::remove_dir_all(path) {
-        log::warn!("failed to remove temp clone directory {path:?}: {error:?}");
+    // When `git clone` fails, git already deletes the directory.
+    if let Err(error) = std::fs::remove_dir_all(path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        log::debug!(
+            "failed to remove temp clone directory {}: {error}",
+            path.display()
+        );
     }
 }
 
