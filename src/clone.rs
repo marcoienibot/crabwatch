@@ -54,9 +54,7 @@ pub async fn clone_repo(
 /// Best-effort removal of a temporary clone directory.
 /// Called on error paths, so a failure here is only logged.
 fn remove_temp_dir(path: &Path) {
-    if path.exists()
-        && let Err(error) = std::fs::remove_dir_all(path)
-    {
+    if let Err(error) = std::fs::remove_dir_all(path) {
         log::warn!("failed to remove temp clone directory {path:?}: {error:?}");
     }
 }
