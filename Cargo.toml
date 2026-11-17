@@ -27,7 +27,6 @@ insta = "1.48.0"
 pedantic = { level = "warn", priority = -1 }
 
 # Pedantic lints that currently fire. Fix the code, then delete these lines.
-ref_option = "allow"
 unnecessary_debug_formatting = "allow"
 
 # Restriction and nursery lints are never enabled as a group, so opt in one by one.
