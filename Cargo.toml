@@ -22,12 +22,7 @@ base64 = "0.23.1"
 insta = "1.48.0"
 
 [lints.clippy]
-# Enable the whole pedantic group. `priority = -1` applies it first,
-# so the per-lint entries below override it.
-pedantic = { level = "warn", priority = -1 }
-
-# Pedantic lints that currently fire. Fix the code, then delete these lines.
-unnecessary_debug_formatting = "allow"
+pedantic = { level = "warn" }
 
 # Restriction lints are never enabled as a group, so opt in one by one.
 as_underscore = "warn"
